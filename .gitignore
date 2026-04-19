@@ -1,0 +1,18 @@
+# סביבה וירטואלית
+.venv/
+
+# קבצי סיסמאות וסשן
+.env
+fb_cookies.json
+
+# לוגים
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/

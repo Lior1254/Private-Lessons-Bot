@@ -8,7 +8,7 @@ from selenium.webdriver.common.keys import Keys
 from datetime import datetime, timedelta, time as dtime
 from dotenv import load_dotenv
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
@@ -41,11 +41,29 @@ def is_posting_hours(config):
     now = datetime.now().time()
     return dtime(config["post_hours"]["start"], 0) <= now <= dtime(config["post_hours"]["end"], 0)
 
-def get_random_text():
+def get_texts_for_groups(n):
+    """מחזיר n טקסטים – כל קבוצה מקבלת טקסט אחר (בלי חזרות עד שנגמרים)."""
     files = [f for f in os.listdir("posts/texts") if f.endswith(".txt")]
-    chosen = random.choice(files)
-    with open(os.path.join("posts/texts", chosen), "r", encoding="utf-8") as f:
-        return f.read().strip(), chosen
+    picked = []
+    while len(picked) < n:
+        batch = files[:]
+        random.shuffle(batch)
+        picked.extend(batch)
+    result = []
+    for name in picked[:n]:
+        with open(os.path.join("posts/texts", name), "r", encoding="utf-8") as f:
+            result.append((f.read().strip(), name))
+    return result
+
+STATE_FILE = "logs/last_posted.json"
+
+def load_state():
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f: return json.load(f)
+    except Exception: return {}
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f: json.dump(state, f, ensure_ascii=False, indent=1)
 
 def get_image_path():
     images = [f for f in os.listdir("posts/images")
@@ -217,9 +235,16 @@ def post_to_group(driver, group_id, message, image_path, title=""):
                "//div[@role='dialog']//div[@aria-label='פרסום']"]:
         try:
             WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, xp))).click()
-            time.sleep(0.5)
-            return True
         except TimeoutException: continue
+        # מחכים שהפוסט באמת יעלה (התמונה צריכה זמן) – עד שחלון הפרסום נסגר
+        try:
+            WebDriverWait(driver, 60).until_not(
+                EC.presence_of_element_located((By.XPATH, "//div[@role='dialog']//div[@role='button'][.//span[text()='פרסום' or text()='פרסם' or text()='Post']]")))
+        except TimeoutException:
+            print("    [!] חלון הפרסום לא נסגר אחרי 60 שניות", end=" ")
+            return False
+        time.sleep(random.uniform(10, 15))
+        return True
 
     return False
 
@@ -237,17 +262,37 @@ def run_post():
             print(f"[{now_str}] מחוץ לשעות"); return
         mode = ""
 
-    message, text_file = get_random_text()
+    sched = config.get("schedule", {})
+    min_gap = sched.get("min_minutes_between_groups", 3)
+    max_gap = sched.get("max_minutes_between_groups", 8)
+    min_hours = sched.get("min_hours_between_posts_same_group", 20)
+
+    state = load_state()
+    groups = []
+    for g in config["groups"]:
+        last = state.get(g["id"])
+        if last and not config.get("test_mode"):
+            hours = (datetime.now() - datetime.fromisoformat(last)).total_seconds() / 3600
+            if hours < min_hours:
+                print(f"  דילוג על '{g['name']}' – פורסם לפני {hours:.0f} שעות")
+                continue
+        groups.append(g)
+    if not groups:
+        print(f"[{now_str}] אין קבוצות לפרסם כרגע"); return
+    random.shuffle(groups)  # סדר אחר בכל פעם – נראה פחות כמו בוט
+
+    texts = get_texts_for_groups(len(groups))
     image_path = get_image_path()
     title = config.get("post_title", "")
-    total = len(config["groups"])
-    print(f"\n[{now_str}] {mode} מתחיל – {total} קבוצות | {text_file}")
+    total = len(groups)
+    print(f"\n[{now_str}] {mode} מתחיל – {total} קבוצות, {min_gap}-{max_gap} דקות בין קבוצה לקבוצה")
 
     driver = create_driver()
     try:
         ensure_logged_in(driver)
-        for i, group in enumerate(config["groups"]):
+        for i, group in enumerate(groups):
             gid, gname = group["id"], group["name"]
+            message, text_file = texts[i]
             remaining = total - i - 1
             print(f"  [{i+1}/{total}] {gname}...", end=" ", flush=True)
             try:
@@ -256,12 +301,16 @@ def run_post():
                 print(f"✗ שגיאה: {e}"); success = False
             if success:
                 logging.info(f"הועלה ל'{gname}' | {text_file}")
+                state[gid] = datetime.now().isoformat(timespec="seconds")
+                save_state(state)
                 suffix = f"נשארו {remaining}" if remaining > 0 else "סיום!"
                 print(f"✓  ({suffix})")
             else:
                 print("✗ נכשל")
             if remaining > 0:
-                time.sleep(2)
+                wait = random.uniform(min_gap, max_gap) * 60
+                print(f"    ממתין {wait/60:.1f} דקות...")
+                time.sleep(wait)
     except KeyboardInterrupt: raise
     finally:
         try:
@@ -279,21 +328,32 @@ def run_post_safe():
             if attempt < 3: time.sleep(30 * attempt)
             else: print("  [!] נכשל 3 פעמים – מדלג")
 
+def is_todays_slot(slot_index, slots_count):
+    """פוסט אחד ביום – כל יום משתמשים בשעה אחרת מהרשימה (מתחלף)."""
+    return datetime.now().date().toordinal() % slots_count == slot_index
+
 if __name__ == "__main__":
     print("=" * 45)
     print("  Facebook Bot – מצב מקלדת")
     print("=" * 45)
     config = load_config()
-    interval_hours = config.get("interval_hours", 3)
-    run_post_safe()
-    next_run = datetime.now() + timedelta(hours=interval_hours)
-    print(f"  הריצה הבאה בשעה {next_run.strftime('%H:%M')}  [Q לעצירה]")
-    scheduler = BlockingScheduler(timezone="Asia/Jerusalem")
-    def job_with_next():
+    times = config.get("schedule", {}).get("times", ["16:30", "20:30"])
+
+    if config.get("test_mode"):
         run_post_safe()
-        next_t = datetime.now() + timedelta(hours=interval_hours)
-        print(f"  הריצה הבאה בשעה {next_t.strftime('%H:%M')}  [Q לעצירה]")
-    scheduler.add_job(job_with_next, IntervalTrigger(hours=interval_hours), id="fb", replace_existing=True)
+
+    scheduler = BlockingScheduler(timezone="Asia/Jerusalem")
+    for idx, t in enumerate(times):
+        h, m = map(int, t.split(":"))
+        def job(idx=idx, t=t):
+            if is_todays_slot(idx, len(times)):
+                run_post_safe()
+            else:
+                print(f"  [{t}] היום מפרסמים בשעה אחרת – מדלג")
+        scheduler.add_job(job, CronTrigger(hour=h, minute=m), id=f"fb_{idx}", replace_existing=True)
+
+    today_slot = times[datetime.now().date().toordinal() % len(times)]
+    print(f"  פוסט אחד ביום. היום בשעה {today_slot}. שעות: {', '.join(times)}  [Q לעצירה]")
     keyboard.add_hotkey("q", lambda: scheduler.shutdown(wait=False))
     try: scheduler.start()
     except: pass

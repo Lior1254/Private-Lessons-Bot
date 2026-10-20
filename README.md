@@ -17,7 +17,9 @@
 |---|---|
 | שעות פעילות | 08:00 עד 23:00 בלבד |
 | שבת | לא מעלה (מסתיים בשישי ב-18:30, מתחדש במוצאי שבת ב-19:40) |
-| תדירות | ניתן לשינוי ב-`config.json` (ברירת מחדל: כל 3 שעות) |
+| תדירות | פוסט אחד ביום, בשעה מתחלפת מתוך `schedule.times` (16:30 / 20:30) |
+| בין קבוצות | המתנה אקראית של 3-8 דקות, וכל קבוצה מקבלת טקסט אחר |
+| הגנה מספאם | לא מפרסם שוב באותה קבוצה לפני 20 שעות (`logs/last_posted.json`) |
 
 ---
 
@@ -59,7 +61,7 @@ python main_keyboard.py
 ```json
 {
   "test_mode": false,         // true = רץ תמיד, false = רק בשעות ולא בשבת
-  "interval_hours": 3,
+  "schedule": { "times": ["16:30", "20:30"], "min_minutes_between_groups": 3, "max_minutes_between_groups": 8, "min_hours_between_posts_same_group": 20 },
   "post_title": "📚 שיעורים פרטיים – ליאור שם טוב",
   "groups": [
     { "id": "12345678", "name": "שם הקבוצה" }

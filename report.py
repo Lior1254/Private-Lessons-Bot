@@ -92,13 +92,31 @@ def send_discord(text):
             logging.info(f"שליחה ל-Discord נכשלה ({e})"); time.sleep(10)
     return False
 
+def run_stats(mode):
+    """מספר הריצה (אמיתיות ובדיקות נספרות בנפרד) + כמה ריצות אמיתיות ב-7 הימים האחרונים."""
+    if not os.path.exists(RESULTS_CSV): return 1, 0
+    with open(RESULTS_CSV, encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    runs = {}
+    for r in rows:
+        runs.setdefault((r["mode"], r["run"]), r["time"])
+    number = sum(1 for (m, _) in runs if m == mode)
+    week_ago = datetime.now().timestamp() - 7 * 86400
+    last_week = sum(1 for (m, _), t in runs.items()
+                    if m == "real" and datetime.strptime(t, "%Y-%m-%d %H:%M").timestamp() >= week_ago)
+    return number, last_week
+
 def build_report(results, started, mode, extra_notes=()):
     counts = {k: sum(1 for r in results if r["status"] == k) for k in ICONS}
     ok = counts["published"] + counts["pending"]
     minutes = (datetime.now() - started).total_seconds() / 60
-    tag = "  ·  🧪 TEST (demo groups)" if mode == "demo" else ""
-    lines = [f"🤖 **Run {started:%a %d/%m · %H:%M}**{tag}",
-             f"**{ok}/{len(results)} posted**  ·  ⏱ {minutes:.0f} min",
+    number, last_week = run_stats(mode)
+    if mode == "demo":
+        title = f"🧪 **Test run #{number}** · {started:%a %d/%m/%Y · %H:%M} · demo groups"
+    else:
+        title = f"🤖 **Run #{number}** · {started:%a %d/%m/%Y · %H:%M}"
+    lines = [title,
+             f"**{ok}/{len(results)} posted**  ·  ⏱ {minutes:.0f} min  ·  📅 {last_week} real runs in the last 7 days",
              ""]
     lines += [f"{ICONS[k]} {NAMES[k]}: **{counts[k]}**" for k in ICONS]
     lines += ["", "**Groups**"]

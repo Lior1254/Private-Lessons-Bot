@@ -458,7 +458,7 @@ def run_post_safe():
             logging.info(f"הריצה נכשלה ({attempt}/2): {e}")
             if attempt < 2: time.sleep(60)
             else:
-                report.send_discord(f"❌ **Run {datetime.now():%a %d/%m · %H:%M} failed completely** – nothing was posted.\n"
+                report.send_discord(f"❌ **Run {datetime.now():%a %d/%m/%Y · %H:%M} failed completely** – nothing was posted.\n"
                                     f"Reason: {str(e)[:300]}")
 
 def is_todays_slot(slot_index, slots_count):

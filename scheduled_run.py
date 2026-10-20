@@ -13,6 +13,11 @@ os.environ["BOT_SCHEDULED"] = "1"
 TEST = "--test" in sys.argv          # בדיקת שינה: קבוצות דמו בלבד
 if TEST: os.environ["BOT_DEMO"] = "1"
 
+# pythonw אין חלון – כל ההדפסות של הבוט נשמרות לקובץ
+os.makedirs("logs", exist_ok=True)
+sys.stdout = sys.stderr = open("logs/scheduled_output.log", "a", encoding="utf-8", buffering=1)
+print(f"\n===== {datetime.now():%d/%m/%Y %H:%M:%S} =====")
+
 from main_keyboard import load_config, run_post_safe, is_todays_slot
 
 log = logging.getLogger("scheduled")
@@ -47,6 +52,7 @@ def main():
     config = load_config()
     times = config.get("schedule", {}).get("times", ["16:30", "20:30"])
     woke_for_us = TEST or idle_seconds() > IDLE_AT_START_SEC
+    if "--no-sleep" in sys.argv: woke_for_us = False   # בדיקה כשאתה ליד המחשב
     slot = current_slot_index(times)
     log.info(f"התחלה {'[בדיקת שינה] ' if TEST else ''}| שעה {times[slot]} | מחשב היה ריק: {woke_for_us}")
 

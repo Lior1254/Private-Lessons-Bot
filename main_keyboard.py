@@ -91,14 +91,34 @@ def keep_awake(on=True):
 
 COOKIES_FILE = "fb_cookies.json"
 
+def offscreen_x():
+    """נקודה מימין לקצה של כל המסכים יחד."""
+    try:
+        um = ctypes.windll.user32
+        return um.GetSystemMetrics(76) + um.GetSystemMetrics(78) + 50  # SM_XVIRTUALSCREEN + SM_CXVIRTUALSCREEN
+    except Exception:
+        return 4000
+
+def debug_snapshot(driver, label):
+    """כשמשהו נכשל – שומר צילום מסך ומצב הדף ב-logs, כדי שנדע למה."""
+    try:
+        name = f"logs/fail_{datetime.now():%m%d_%H%M%S}_{label}.png"
+        driver.save_screenshot(name)
+        info = driver.execute_script(
+            "return [document.visibilityState, document.title, location.href, window.innerWidth+'x'+window.innerHeight]")
+        logging.info(f"כישלון ({label}): {info} | צילום: {name}")
+    except Exception as e:
+        logging.info(f"כישלון ({label}), לא הצלחתי לצלם: {e}")
+
 def create_driver():
     options = Options()
     if os.environ.get("BOT_SHOW"):
         # הרצה ידנית – רואים את הכל בלייב
         options.add_argument("--start-maximized")
     else:
-        # חלון מחוץ למסך – לא קופץ מעל העבודה שלך ולא לוקח את העכבר
-        options.add_argument("--window-position=-32000,-32000")
+        # חלון מימין לכל המסכים – לא קופץ מעל העבודה שלך ולא לוקח את העכבר
+        # (לא -32000: זה המיקום של חלון ממוזער, ואז פייסבוק לא מצייר את הדף)
+        options.add_argument(f"--window-position={offscreen_x()},0")
         options.add_argument("--window-size=1280,900")
     # שהדף ימשיך לעבוד גם כשהחלון לא נראה
     options.add_argument("--disable-backgrounding-occluded-windows")
@@ -186,12 +206,15 @@ def post_to_group(driver, group_id, message, image_path, title=""):
         buttons = driver.find_elements(By.XPATH, "//div[@role='button'] | //span[@role='button']")
         texts = [b.text.strip() for b in buttons if b.text.strip()][:15]
         print(f"    [!] כפתור יצירת פוסט לא נמצא. כפתורים בדף: {texts}")
+        logging.info(f"כפתור יצירת פוסט לא נמצא בקבוצה {group_id}. כפתורים: {texts}")
+        debug_snapshot(driver, "no_button")
         return False
 
     try:
         WebDriverWait(driver, 6).until(EC.presence_of_element_located((By.XPATH, "//div[@role='dialog']")))
     except TimeoutException:
         print("    [!] דיאלוג פרסום לא נפתח")
+        debug_snapshot(driver, "no_dialog")
         return False
     time.sleep(1)
 
@@ -266,6 +289,7 @@ def post_to_group(driver, group_id, message, image_path, title=""):
                 EC.presence_of_element_located((By.XPATH, "//div[@role='dialog']//div[@role='button'][.//span[text()='פרסום' or text()='פרסם' or text()='Post']]")))
         except TimeoutException:
             print("    [!] חלון הפרסום לא נסגר אחרי 60 שניות", end=" ")
+            debug_snapshot(driver, "not_published")
             return False
         time.sleep(random.uniform(10, 15))
         return True
@@ -330,6 +354,7 @@ def run_post():
                 success = post_to_group(driver, gid, message, image_path, title)
             except Exception as e:
                 print(f"✗ שגיאה: {e}"); success = False
+                logging.info(f"שגיאה בקבוצה '{gname}': {e}")
             if success:
                 logging.info(f"הועלה ל'{gname}' | {text_file}")
                 if not os.environ.get("BOT_DEMO"):
@@ -339,6 +364,7 @@ def run_post():
                 print(f"✓  ({suffix})")
             else:
                 print("✗ נכשל")
+                logging.info(f"נכשל ל'{gname}'")
             if remaining > 0:
                 wait = random.uniform(min_gap, max_gap) * 60
                 print(f"    ממתין {wait/60:.1f} דקות...")

@@ -20,6 +20,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 
 load_dotenv()
+import report
+LAST_REASON = ""
 os.makedirs("logs", exist_ok=True)
 logging.basicConfig(filename="logs/history.log", level=logging.INFO,
                     format="%(asctime)s - %(message)s", encoding="utf-8")
@@ -188,6 +190,8 @@ def ensure_logged_in(driver):
 
 # ========== פרסום – כתיבה דרך מקלדת ==========
 def post_to_group(driver, group_id, message, image_path, title=""):
+    global LAST_REASON
+    LAST_REASON = ""
     driver.get(f"https://www.facebook.com/groups/{group_id}")
     time.sleep(1.5)
 
@@ -233,6 +237,7 @@ def post_to_group(driver, group_id, message, image_path, title=""):
         print(f"    [!] כפתור יצירת פוסט לא נמצא. כפתורים בדף: {texts}")
         logging.info(f"כפתור יצירת פוסט לא נמצא בקבוצה {group_id}. כפתורים: {texts}")
         debug_snapshot(driver, "no_button")
+        LAST_REASON = "לא נמצא כפתור כתיבת פוסט"
         return False
 
     try:
@@ -240,6 +245,7 @@ def post_to_group(driver, group_id, message, image_path, title=""):
     except TimeoutException:
         print("    [!] דיאלוג פרסום לא נפתח")
         debug_snapshot(driver, "no_dialog")
+        LAST_REASON = "חלון הפרסום לא נפתח"
         return False
     time.sleep(1)
 
@@ -315,10 +321,13 @@ def post_to_group(driver, group_id, message, image_path, title=""):
         except TimeoutException:
             print("    [!] חלון הפרסום לא נסגר אחרי 60 שניות", end=" ")
             debug_snapshot(driver, "not_published")
+            LAST_REASON = "לחצתי 'פרסום' אבל הפוסט לא עלה תוך 60 שניות"
             return False
         time.sleep(random.uniform(10, 15))
         return True
 
+    debug_snapshot(driver, "no_publish_button")
+    LAST_REASON = "לא נמצא כפתור 'פרסום'"
     return False
 
 
@@ -366,34 +375,71 @@ def run_post():
     total = len(groups)
     print(f"\n[{now_str}] {mode} מתחיל – {total} קבוצות, {min_gap}-{max_gap} דקות בין קבוצה לקבוצה")
 
+    started = datetime.now()
+    run_mode = "demo" if os.environ.get("BOT_DEMO") else "real"
+    results = []
     keep_awake(True)
     driver = create_driver()
     try:
         ensure_logged_in(driver)
+
+        def attempt(group, message, text_file):
+            """מפרסם לקבוצה אחת ובודק בדף 'התוכן שלי' של הקבוצה שהפוסט באמת שם."""
+            gid = group["id"]
+            snippet = report.snippet_of(message)
+            before = report.content_counts(driver, gid, snippet)
+            try:
+                ok = post_to_group(driver, gid, message, image_path, title)
+                reason = LAST_REASON
+            except Exception as e:
+                ok, reason = False, f"שגיאה: {str(e)[:80]}"
+            if not ok:
+                return "failed", reason
+            time.sleep(5)
+            after = report.content_counts(driver, gid, snippet)
+            logging.info(f"אימות '{group['name']}': לפני {before} אחרי {after}")
+            return report.decide_status(before, after), ""
+
         for i, group in enumerate(groups):
-            gid, gname = group["id"], group["name"]
             message, text_file = texts[i]
             remaining = total - i - 1
-            print(f"  [{i+1}/{total}] {gname}...", end=" ", flush=True)
-            try:
-                success = post_to_group(driver, gid, message, image_path, title)
-            except Exception as e:
-                print(f"✗ שגיאה: {e}"); success = False
-                logging.info(f"שגיאה בקבוצה '{gname}': {e}")
-            if success:
-                logging.info(f"הועלה ל'{gname}' | {text_file}")
-                if not os.environ.get("BOT_DEMO"):
-                    state[gid] = datetime.now().isoformat(timespec="seconds")
-                    save_state(state)
-                suffix = f"נשארו {remaining}" if remaining > 0 else "סיום!"
-                print(f"✓  ({suffix})")
-            else:
-                print("✗ נכשל")
-                logging.info(f"נכשל ל'{gname}'")
+            print(f"  [{i+1}/{total}] {group['name']}...", end=" ", flush=True)
+            status, reason = attempt(group, message, text_file)
+            results.append({"id": group["id"], "name": group["name"], "text": text_file,
+                            "status": status, "reason": reason, "attempts": 1,
+                            "_message": message})
+            print(f"{report.ICONS[status]} {report.NAMES[status]} {reason}")
+            logging.info(f"{report.NAMES[status]} – '{group['name']}' | {text_file} {reason}")
+            if status != "failed" and run_mode == "real":
+                state[group["id"]] = datetime.now().isoformat(timespec="seconds")
+                save_state(state)
             if remaining > 0:
                 wait = random.uniform(min_gap, max_gap) * 60
                 print(f"    ממתין {wait/60:.1f} דקות...")
                 time.sleep(wait)
+
+        # ניסיון חוזר אחד בסוף – רק לקבוצות שנכשלו, ורק אם לא הכל נכשל
+        notes = []
+        failed = [r for r in results if r["status"] == "failed"]
+        if failed and len(failed) == len(results):
+            notes.append("❗ כל הקבוצות נכשלו – כנראה בעיה כללית (התחברות לפייסבוק / שינוי באתר). "
+                         "לא ניסיתי שוב. הצילומים נמצאים ב-logs.")
+        elif failed:
+            print(f"\n  ניסיון חוזר ל-{len(failed)} קבוצות...")
+            time.sleep(min_gap * 60)
+            for r in failed:
+                status, reason = attempt({"id": r["id"], "name": r["name"]}, r["_message"], r["text"])
+                r.update(status=status, reason=reason or r["reason"], attempts=2)
+                logging.info(f"ניסיון חוזר: {report.NAMES[status]} – '{r['name']}' {reason}")
+                if status != "failed" and run_mode == "real":
+                    state[r["id"]] = datetime.now().isoformat(timespec="seconds")
+                    save_state(state)
+
+        report.save_results(results, started.strftime("%Y%m%d_%H%M"), run_mode)
+        text = report.build_report(results, started, run_mode, notes)
+        print("\n" + text)
+        report.send_discord(text)
+        return results
     except KeyboardInterrupt: raise
     finally:
         keep_awake(False)
@@ -403,14 +449,17 @@ def run_post():
         except: pass
 
 def run_post_safe():
-    for attempt in range(1, 4):
+    for attempt in range(1, 3):
         try:
             run_post(); return
         except KeyboardInterrupt: raise
         except Exception as e:
-            print(f"  [!] ניסיון {attempt}/3 נכשל: {e}")
-            if attempt < 3: time.sleep(30 * attempt)
-            else: print("  [!] נכשל 3 פעמים – מדלג")
+            print(f"  [!] ניסיון {attempt}/2 נכשל: {e}")
+            logging.info(f"הריצה נכשלה ({attempt}/2): {e}")
+            if attempt < 2: time.sleep(60)
+            else:
+                report.send_discord(f"❌ **הריצה של {datetime.now():%d/%m %H:%M} נכשלה לגמרי** – לא עלה אף פוסט.\n"
+                                    f"סיבה: {str(e)[:300]}")
 
 def is_todays_slot(slot_index, slots_count):
     """פוסט אחד ביום – כל יום משתמשים בשעה אחרת מהרשימה (מתחלף)."""

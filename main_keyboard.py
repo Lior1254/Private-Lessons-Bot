@@ -93,9 +93,13 @@ COOKIES_FILE = "fb_cookies.json"
 
 def create_driver():
     options = Options()
-    # חלון מחוץ למסך – לא קופץ מעל העבודה שלך ולא לוקח את העכבר
-    options.add_argument("--window-position=-32000,-32000")
-    options.add_argument("--window-size=1280,900")
+    if os.environ.get("BOT_SHOW"):
+        # הרצה ידנית – רואים את הכל בלייב
+        options.add_argument("--start-maximized")
+    else:
+        # חלון מחוץ למסך – לא קופץ מעל העבודה שלך ולא לוקח את העכבר
+        options.add_argument("--window-position=-32000,-32000")
+        options.add_argument("--window-size=1280,900")
     # שהדף ימשיך לעבוד גם כשהחלון לא נראה
     options.add_argument("--disable-backgrounding-occluded-windows")
     options.add_argument("--disable-renderer-backgrounding")
@@ -134,7 +138,8 @@ def ensure_logged_in(driver):
     print("\n  [!] התחבר ידנית בחלון שנפתח ולחץ Enter")
     input("  Enter: ")
     save_cookies(driver)
-    driver.set_window_position(-32000, -32000)
+    if not os.environ.get("BOT_SHOW"):
+        driver.set_window_position(-32000, -32000)
 
 # ========== פרסום – כתיבה דרך מקלדת ==========
 def post_to_group(driver, group_id, message, image_path, title=""):
@@ -288,7 +293,13 @@ def run_post():
 
     state = load_state()
     groups = []
-    for g in config["groups"]:
+    if os.environ.get("BOT_DEMO"):
+        # בדיקה: רק קבוצות הדמו, המתנה קצרה, בלי לגעת בקבוצות האמיתיות
+        demo = [g for g in config.get("_groups_disabled", []) if "דמו" in g["name"]]
+        min_gap = max_gap = 0.2
+        mode = "[DEMO]"
+        state = {}
+    for g in (demo if os.environ.get("BOT_DEMO") else config["groups"]):
         last = state.get(g["id"])
         if last and not config.get("test_mode"):
             hours = (datetime.now() - datetime.fromisoformat(last)).total_seconds() / 3600
@@ -321,8 +332,9 @@ def run_post():
                 print(f"✗ שגיאה: {e}"); success = False
             if success:
                 logging.info(f"הועלה ל'{gname}' | {text_file}")
-                state[gid] = datetime.now().isoformat(timespec="seconds")
-                save_state(state)
+                if not os.environ.get("BOT_DEMO"):
+                    state[gid] = datetime.now().isoformat(timespec="seconds")
+                    save_state(state)
                 suffix = f"נשארו {remaining}" if remaining > 0 else "סיום!"
                 print(f"✓  ({suffix})")
             else:

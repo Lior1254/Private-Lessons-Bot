@@ -10,6 +10,8 @@ from datetime import datetime
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 os.environ["BOT_SCHEDULED"] = "1"
+TEST = "--test" in sys.argv          # בדיקת שינה: קבוצות דמו בלבד
+if TEST: os.environ["BOT_DEMO"] = "1"
 
 from main_keyboard import load_config, run_post_safe, is_todays_slot
 
@@ -44,11 +46,11 @@ def current_slot_index(times):
 def main():
     config = load_config()
     times = config.get("schedule", {}).get("times", ["16:30", "20:30"])
-    woke_for_us = idle_seconds() > IDLE_AT_START_SEC
+    woke_for_us = TEST or idle_seconds() > IDLE_AT_START_SEC
     slot = current_slot_index(times)
-    log.info(f"התחלה | שעה {times[slot]} | מחשב היה ריק: {woke_for_us}")
+    log.info(f"התחלה {'[בדיקת שינה] ' if TEST else ''}| שעה {times[slot]} | מחשב היה ריק: {woke_for_us}")
 
-    if is_todays_slot(slot, len(times)):
+    if TEST or is_todays_slot(slot, len(times)):
         try:
             run_post_safe()
             log.info("סיום פרסום")
@@ -59,7 +61,7 @@ def main():
 
     if woke_for_us and sys.platform == "win32":
         idle = idle_seconds()
-        if idle > IDLE_AT_END_SEC:
+        if idle > (90 if TEST else IDLE_AT_END_SEC):
             log.info("מחזיר את המחשב לשינה")
             time.sleep(5)
             go_to_sleep()

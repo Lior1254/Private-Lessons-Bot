@@ -70,8 +70,33 @@ def get_image_path():
               if f.lower().endswith((".jpg", ".jpeg", ".png"))]
     return os.path.abspath(os.path.join("posts/images", random.choice(images)))
 
+def type_into(driver, element, text):
+    """כותב טקסט ישירות לתוך Chrome – בלי לוח ההעתקה.
+    עובד גם כשהמחשב נעול בסיסמה (אז Windows חוסם את הלוח)."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line:
+            driver.execute_cdp_cmd("Input.insertText", {"text": line})
+        if i < len(lines) - 1:
+            element.send_keys(Keys.SHIFT, Keys.ENTER)   # ירידת שורה בתוך הפוסט
+        time.sleep(0.05)
+
 def paste_into(element, text):
-    """מדביק טקסט לשדה דרך Chrome בלבד, ומחזיר ללוח את מה שהיה בו קודם."""
+    """כותב לשדה. קודם בלי לוח ההעתקה; אם זה לא נקלט – דרך הלוח (ומחזיר את מה שהיה בו)."""
+    driver = element.parent
+    first = next((l for l in text.split("\n") if l.strip()), "")[:12]
+    try:
+        type_into(driver, element, text)
+        time.sleep(0.3)
+        written = driver.execute_script("return arguments[0].value || arguments[0].innerText || ''", element)
+        if first and first in written.replace("\u00a0", " "):
+            return
+        logging.info("הכתיבה הישירה לא נקלטה – מנסה דרך הלוח")
+    except Exception as e:
+        logging.info(f"כתיבה ישירה נכשלה ({e}) – מנסה דרך הלוח")
+    try:   # מנקים מה שאולי נכתב חלקית, כדי שלא יהיה כפול
+        element.send_keys(Keys.CONTROL, 'a'); element.send_keys(Keys.DELETE)
+    except Exception: pass
     try: old = pyperclip.paste()
     except Exception: old = None
     pyperclip.copy(text)

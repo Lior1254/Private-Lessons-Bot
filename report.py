@@ -7,7 +7,7 @@ from datetime import datetime
 
 RESULTS_CSV = "logs/results.csv"
 ICONS = {"published": "✅", "pending": "⏳", "unverified": "⚠️", "failed": "❌"}
-NAMES = {"published": "פורסם", "pending": "ממתין לאישור", "unverified": "לא אומת", "failed": "נכשל"}
+NAMES = {"published": "Published", "pending": "Pending approval", "unverified": "Unverified", "failed": "Failed"}
 
 # ---------- בדיקה שהפוסט באמת עלה ----------
 def snippet_of(message, length=22):
@@ -69,11 +69,11 @@ def history_notes(results, mode):
     for r in results:
         last = [x["status"] for x in rows if x["group_id"] == r["id"]][-3:]
         if len(last) == 3 and all(s == "failed" for s in last):
-            notes.append(f"❌ **{r['name']}** נכשלה 3 ריצות ברצוף – כדאי לבדוק אם עדיין אפשר לפרסם שם")
+            notes.append(f"❌ **{r['name']}** failed 3 runs in a row – check if you can still post there")
         elif len(last) == 3 and all(s == "pending" for s in last):
-            notes.append(f"⏳ **{r['name']}** – 3 פעמים ברצוף ממתין לאישור. בדוק אם המנהל מאשר בכלל")
+            notes.append(f"⏳ **{r['name']}** pending approval 3 runs in a row – the admin may not be approving posts")
         elif len(last) == 3 and all(s == "unverified" for s in last):
-            notes.append(f"⚠️ **{r['name']}** – 3 פעמים לא הצלחתי לאמת. כדאי להיכנס ולבדוק בעיניים")
+            notes.append(f"⚠️ **{r['name']}** unverified 3 runs in a row – open the group and check by eye")
     return notes
 
 # ---------- Discord ----------
@@ -82,7 +82,7 @@ def send_discord(text):
     if not url:
         logging.info("אין DISCORD_WEBHOOK ב-.env – לא נשלח דיווח"); return False
     if len(text) > 1990: text = text[:1980] + "\n…"
-    body = json.dumps({"content": text, "username": "בוט שיעורים פרטיים"}).encode("utf-8")
+    body = json.dumps({"content": text, "username": "Lessons Bot"}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json",
                                                           "User-Agent": "LessonsBot/1.0"})
     for attempt in range(3):
@@ -95,19 +95,20 @@ def send_discord(text):
 def build_report(results, started, mode, extra_notes=()):
     counts = {k: sum(1 for r in results if r["status"] == k) for k in ICONS}
     ok = counts["published"] + counts["pending"]
-    tag = " · 🧪 בדיקה (קבוצות דמו)" if mode == "demo" else ""
     minutes = (datetime.now() - started).total_seconds() / 60
-    lines = [f"🤖 **ריצה {started:%d/%m %H:%M}** – {ok}/{len(results)} עלו{tag}",
-             " · ".join(f"{ICONS[k]} {NAMES[k]}: {counts[k]}" for k in ICONS if counts[k] or k in ("published", "failed")),
+    tag = "  ·  🧪 TEST (demo groups)" if mode == "demo" else ""
+    lines = [f"🤖 **Run {started:%a %d/%m · %H:%M}**{tag}",
+             f"**{ok}/{len(results)} posted**  ·  ⏱ {minutes:.0f} min",
              ""]
+    lines += [f"{ICONS[k]} {NAMES[k]}: **{counts[k]}**" for k in ICONS]
+    lines += ["", "**Groups**"]
     order = {"failed": 0, "unverified": 1, "pending": 2, "published": 3}
     for r in sorted(results, key=lambda r: order[r["status"]]):
         line = f"{ICONS[r['status']]} {r['name']}"
-        if r["status"] == "failed" and r.get("reason"): line += f" – {r['reason']}"
-        if r.get("attempts", 1) > 1: line += f" (ניסיון {r['attempts']})"
+        if r["status"] == "failed" and r.get("reason"): line += f" — {r['reason']}"
+        if r.get("attempts", 1) > 1: line += " (2nd try)"
         lines.append(line)
-    lines.append(f"⏱ {minutes:.0f} דק'")
     notes = list(extra_notes) + history_notes(results, mode)
     if notes:
-        lines += ["", "**הערות:**"] + notes
+        lines += ["", "**Notes**"] + notes
     return "\n".join(lines)

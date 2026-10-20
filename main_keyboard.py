@@ -178,7 +178,7 @@ def ensure_logged_in(driver):
         return
     if os.environ.get("BOT_SCHEDULED"):
         # ריצה אוטומטית – אין מי שיתחבר, לא מחכים לנצח
-        raise RuntimeError("צריך להתחבר מחדש לפייסבוק – הרץ run_once.bat והתחבר")
+        raise RuntimeError("Facebook logged you out – run run_once.bat and log in again")
     driver.set_window_position(0, 0)   # מחזירים את החלון למסך כדי שתוכל להתחבר
     driver.maximize_window()
     driver.get("https://www.facebook.com")
@@ -237,7 +237,7 @@ def post_to_group(driver, group_id, message, image_path, title=""):
         print(f"    [!] כפתור יצירת פוסט לא נמצא. כפתורים בדף: {texts}")
         logging.info(f"כפתור יצירת פוסט לא נמצא בקבוצה {group_id}. כפתורים: {texts}")
         debug_snapshot(driver, "no_button")
-        LAST_REASON = "לא נמצא כפתור כתיבת פוסט"
+        LAST_REASON = "\"Write post\" button not found"
         return False
 
     try:
@@ -245,7 +245,7 @@ def post_to_group(driver, group_id, message, image_path, title=""):
     except TimeoutException:
         print("    [!] דיאלוג פרסום לא נפתח")
         debug_snapshot(driver, "no_dialog")
-        LAST_REASON = "חלון הפרסום לא נפתח"
+        LAST_REASON = "Post dialog did not open"
         return False
     time.sleep(1)
 
@@ -321,13 +321,13 @@ def post_to_group(driver, group_id, message, image_path, title=""):
         except TimeoutException:
             print("    [!] חלון הפרסום לא נסגר אחרי 60 שניות", end=" ")
             debug_snapshot(driver, "not_published")
-            LAST_REASON = "לחצתי 'פרסום' אבל הפוסט לא עלה תוך 60 שניות"
+            LAST_REASON = "Clicked Post but it did not go through in 60s"
             return False
         time.sleep(random.uniform(10, 15))
         return True
 
     debug_snapshot(driver, "no_publish_button")
-    LAST_REASON = "לא נמצא כפתור 'פרסום'"
+    LAST_REASON = "\"Post\" button not found"
     return False
 
 
@@ -392,7 +392,7 @@ def run_post():
                 ok = post_to_group(driver, gid, message, image_path, title)
                 reason = LAST_REASON
             except Exception as e:
-                ok, reason = False, f"שגיאה: {str(e)[:80]}"
+                ok, reason = False, f"Error: {str(e)[:80]}"
             if not ok:
                 return "failed", reason
             time.sleep(5)
@@ -422,8 +422,8 @@ def run_post():
         notes = []
         failed = [r for r in results if r["status"] == "failed"]
         if failed and len(failed) == len(results):
-            notes.append("❗ כל הקבוצות נכשלו – כנראה בעיה כללית (התחברות לפייסבוק / שינוי באתר). "
-                         "לא ניסיתי שוב. הצילומים נמצאים ב-logs.")
+            notes.append("❗ Every group failed – probably a general problem (Facebook login or a site change). "
+                         "No retry. Screenshots are in the logs folder.")
         elif failed:
             print(f"\n  ניסיון חוזר ל-{len(failed)} קבוצות...")
             time.sleep(min_gap * 60)
@@ -458,8 +458,8 @@ def run_post_safe():
             logging.info(f"הריצה נכשלה ({attempt}/2): {e}")
             if attempt < 2: time.sleep(60)
             else:
-                report.send_discord(f"❌ **הריצה של {datetime.now():%d/%m %H:%M} נכשלה לגמרי** – לא עלה אף פוסט.\n"
-                                    f"סיבה: {str(e)[:300]}")
+                report.send_discord(f"❌ **Run {datetime.now():%a %d/%m · %H:%M} failed completely** – nothing was posted.\n"
+                                    f"Reason: {str(e)[:300]}")
 
 def is_todays_slot(slot_index, slots_count):
     """פוסט אחד ביום – כל יום משתמשים בשעה אחרת מהרשימה (מתחלף)."""

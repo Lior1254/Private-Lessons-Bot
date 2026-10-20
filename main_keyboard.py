@@ -1,9 +1,9 @@
 # ===================================================
 # main_keyboard.py
-# כותב כותרת דרך המקלדת (pyautogui) – מצריך Chrome בפוקוס
+# מפרסם דרך Chrome מחוץ למסך – אפשר להמשיך לעבוד על המחשב בזמן הריצה
 # ===================================================
 import os, json, random, logging, time, threading
-import keyboard, pyperclip, pyautogui
+import keyboard, pyperclip, ctypes, sys
 from selenium.webdriver.common.keys import Keys
 from datetime import datetime, timedelta, time as dtime
 from dotenv import load_dotenv
@@ -70,11 +70,36 @@ def get_image_path():
               if f.lower().endswith((".jpg", ".jpeg", ".png"))]
     return os.path.abspath(os.path.join("posts/images", random.choice(images)))
 
+def paste_into(element, text):
+    """מדביק טקסט לשדה דרך Chrome בלבד, ומחזיר ללוח את מה שהיה בו קודם."""
+    try: old = pyperclip.paste()
+    except Exception: old = None
+    pyperclip.copy(text)
+    element.send_keys(Keys.CONTROL, 'v')
+    time.sleep(0.3)
+    if old is not None:
+        try: pyperclip.copy(old)
+        except Exception: pass
+
+def keep_awake(on=True):
+    """מונע מ-Windows להירדם באמצע הפרסום."""
+    if sys.platform != "win32": return
+    ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+    flags = ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0)
+    try: ctypes.windll.kernel32.SetThreadExecutionState(flags)
+    except Exception: pass
+
 COOKIES_FILE = "fb_cookies.json"
 
 def create_driver():
     options = Options()
-    options.add_argument("--start-maximized")
+    # חלון מחוץ למסך – לא קופץ מעל העבודה שלך ולא לוקח את העכבר
+    options.add_argument("--window-position=-32000,-32000")
+    options.add_argument("--window-size=1280,900")
+    # שהדף ימשיך לעבוד גם כשהחלון לא נראה
+    options.add_argument("--disable-backgrounding-occluded-windows")
+    options.add_argument("--disable-renderer-backgrounding")
+    options.add_argument("--disable-background-timer-throttling")
     options.add_argument("--disable-notifications")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -100,10 +125,16 @@ def load_cookies(driver):
 def ensure_logged_in(driver):
     if load_cookies(driver) and "login" not in driver.current_url:
         return
+    if os.environ.get("BOT_SCHEDULED"):
+        # ריצה אוטומטית – אין מי שיתחבר, לא מחכים לנצח
+        raise RuntimeError("צריך להתחבר מחדש לפייסבוק – הרץ run_once.bat והתחבר")
+    driver.set_window_position(0, 0)   # מחזירים את החלון למסך כדי שתוכל להתחבר
+    driver.maximize_window()
     driver.get("https://www.facebook.com")
     print("\n  [!] התחבר ידנית בחלון שנפתח ולחץ Enter")
     input("  Enter: ")
     save_cookies(driver)
+    driver.set_window_position(-32000, -32000)
 
 # ========== פרסום – כתיבה דרך מקלדת ==========
 def post_to_group(driver, group_id, message, image_path, title=""):
@@ -181,25 +212,14 @@ def post_to_group(driver, group_id, message, image_path, title=""):
             )
             driver.execute_script("arguments[0].focus(); arguments[0].click();", title_field)
             time.sleep(0.2)
-            pyperclip.copy(title)
-            title_field.send_keys(Keys.CONTROL, 'v')
-            time.sleep(0.2)
+            paste_into(title_field, title)
             title_written = True
         except TimeoutException:
             pass
         if not title_written:
-            import pygetwindow as gw
-            try:
-                wins = [w for w in gw.getAllWindows()
-                        if 'chrome' in w.title.lower() or 'facebook' in w.title.lower()]
-                if wins:
-                    wins[0].activate()
-                    time.sleep(0.5)
-            except Exception:
-                pass
-            pyperclip.copy(title)
-            pyautogui.hotkey('ctrl', 'v')
-            time.sleep(0.1)
+            # אין שדה כותרת – שמים את הכותרת בשורה הראשונה של הטקסט
+            # (בעבר זה הודבק עם Ctrl+V לחלון הפתוח – מסוכן כשעובדים על המחשב)
+            message = title + "\n\n" + message
 
     for xp in ["//*[@aria-placeholder='כאן כותבים...']",
                "//*[@aria-placeholder='Write something...']",
@@ -208,8 +228,7 @@ def post_to_group(driver, group_id, message, image_path, title=""):
             box = WebDriverWait(driver, 2).until(EC.presence_of_element_located((By.XPATH, xp)))
             driver.execute_script("arguments[0].focus(); arguments[0].click();", box)
             time.sleep(0.2)
-            pyperclip.copy(message)
-            box.send_keys(Keys.CONTROL, 'v')
+            paste_into(box, message)
             break
         except TimeoutException: continue
 
@@ -287,6 +306,7 @@ def run_post():
     total = len(groups)
     print(f"\n[{now_str}] {mode} מתחיל – {total} קבוצות, {min_gap}-{max_gap} דקות בין קבוצה לקבוצה")
 
+    keep_awake(True)
     driver = create_driver()
     try:
         ensure_logged_in(driver)
@@ -313,6 +333,7 @@ def run_post():
                 time.sleep(wait)
     except KeyboardInterrupt: raise
     finally:
+        keep_awake(False)
         try:
             time.sleep(2)
             driver.quit()

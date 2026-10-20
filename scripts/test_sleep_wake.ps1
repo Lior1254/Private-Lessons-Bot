@@ -1,13 +1,14 @@
 # One-time SLEEP/WAKE test: wakes the PC 90 seconds from now, posts to the 2 DEMO groups only, then sleeps again.
 $ErrorActionPreference = "Stop"
+$root = Split-Path $PSScriptRoot -Parent   # the project folder (this file lives in scripts\)
 $taskName = "FacebookLessonsBot_TEST"
-$script = Join-Path $PSScriptRoot "scheduled_run.py"
-$py = Join-Path $PSScriptRoot ".venv\Scripts\pythonw.exe"
+$script = Join-Path $root "scheduled_run.py"
+$py = Join-Path $root ".venv\Scripts\pythonw.exe"
 if (-not (Test-Path $py)) { $py = (Get-Command pythonw.exe -ErrorAction Stop).Source }
 
 $when = (Get-Date).AddSeconds(90)
 $trigger = New-ScheduledTaskTrigger -Once -At $when
-$action = New-ScheduledTaskAction -Execute $py -Argument "`"$script`" --test" -WorkingDirectory $PSScriptRoot
+$action = New-ScheduledTaskAction -Execute $py -Argument "`"$script`" --test" -WorkingDirectory $root
 $settings = New-ScheduledTaskSettingsSet -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
   -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive

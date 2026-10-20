@@ -18,7 +18,7 @@ os.makedirs("logs", exist_ok=True)
 sys.stdout = sys.stderr = open("logs/scheduled_output.log", "a", encoding="utf-8", buffering=1)
 print(f"\n===== {datetime.now():%d/%m/%Y %H:%M:%S} =====")
 
-from main_keyboard import load_config, run_post_safe, is_todays_slot
+from bot import load_config, run_post_safe, is_todays_slot
 
 log = logging.getLogger("scheduled")
 fh = logging.FileHandler("logs/scheduled.log", encoding="utf-8")
@@ -64,6 +64,10 @@ def main():
             log.info(f"שגיאה: {e}")
     else:
         log.info("היום מפרסמים בשעה אחרת – לא מפרסם")
+
+    if not TEST:
+        import report
+        report.ping_healthcheck()   # "הבוט חי" – רק אם הוגדר HEALTHCHECK_URL ב-.env
 
     if woke_for_us and sys.platform == "win32":
         idle = idle_seconds()

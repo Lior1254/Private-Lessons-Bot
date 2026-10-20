@@ -116,7 +116,7 @@ def build_report(results, started, mode, extra_notes=()):
     else:
         title = f"🤖 **Run #{number}** · {started:%a %d/%m/%Y · %H:%M}"
     lines = [title,
-             f"**{ok}/{len(results)} posted**  ·  ⏱ {minutes:.0f} min  ·  📅 {last_week} real runs in the last 7 days",
+             f"**{ok}/{len(results)} posted**  ·  ⏱ {minutes:.0f} min  ·  📅 {last_week} real run{'' if last_week == 1 else 's'} in the last 7 days",
              ""]
     lines += [f"{ICONS[k]} {NAMES[k]}: **{counts[k]}**" for k in ICONS]
     lines += ["", "**Groups**"]
@@ -130,3 +130,12 @@ def build_report(results, started, mode, extra_notes=()):
     if notes:
         lines += ["", "**Notes**"] + notes
     return "\n".join(lines)
+
+# ---------- "הבוט חי" (אופציונלי) ----------
+def ping_healthcheck():
+    """אם יש HEALTHCHECK_URL ב-.env (למשל מ-healthchecks.io) – מודיע לו שהבוט רץ.
+    אם הבוט לא מודיע בזמן (המחשב לא התעורר), השירות שולח התראה ל-Discord."""
+    url = os.environ.get("HEALTHCHECK_URL", "").strip()
+    if not url: return
+    try: urllib.request.urlopen(url, timeout=15)
+    except Exception as e: logging.info(f"healthcheck ping נכשל ({e})")

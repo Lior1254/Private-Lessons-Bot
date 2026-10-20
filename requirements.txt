@@ -1,6 +1,4 @@
 selenium
 webdriver-manager
 python-dotenv
-APScheduler
 pyperclip
-keyboard
